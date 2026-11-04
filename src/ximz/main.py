@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+import threading
 import time
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
@@ -20,12 +21,11 @@ import numpy as np
 from ximz.agent import Agent, LLMUnavailableError, ToolLimitError
 from ximz.audio import MicStream, maybe_save_debug
 from ximz.config import Config, load_config
-from ximz.conversation import is_end_phrase
+from ximz.conversation import is_end_phrase, is_yes
 from ximz.events import EventBus, State, StateEvent
 from ximz.memory import MemoryStore
 from ximz.stt import create_stt
-from ximz.tools import ToolRegistry
-from ximz.tools.memory import memory_tools
+from ximz.tools.catalog import build_registry
 from ximz.tts import create_tts
 from ximz.vad import Segmenter, SileroVAD
 from ximz.wakeword import WhisperWakeWord
@@ -39,17 +39,14 @@ class Assistant:
         self.bus = bus
         self.stt = create_stt(cfg.stt)
         self.tts = create_tts(cfg.tts)
-        tools = ToolRegistry()
         memory = None
         # One background worker for memory extraction, so it never delays a reply.
         self._learner = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ximz-learn")
         if cfg.memory.enabled:
             memory = MemoryStore(cfg.memory)
-            for tool in memory_tools(memory, cfg.memory.max_fact_chars):
-                tools.register(tool)
             log.info("memory: %d fact(s) from %s", len(memory.facts()), memory.path)
         self.memory = memory
-        self.agent = Agent(cfg.llm, tools=tools, memory=memory)
+        self.agent = Agent(cfg.llm, tools=build_registry(cfg, memory), memory=memory)
         self.mic = MicStream(cfg.audio)
         self.segmenter = Segmenter(SileroVAD(cfg.audio.sample_rate), cfg.vad, cfg.audio)
         self.wake = WhisperWakeWord(cfg.wake, self.stt, cfg.audio.sample_rate)
@@ -59,6 +56,10 @@ class Assistant:
     # -- startup -----------------------------------------------------------
 
     def startup(self) -> None:
+        if "calendar" in self.cfg.tools.enabled:
+            # Ask for Calendar/Reminders access now (macOS shows a one-time
+            # prompt) rather than in the middle of a spoken request.
+            threading.Thread(target=self._request_calendar_access, name="ximz-eventkit", daemon=True).start()
         self._wait_for_llm()
         self.tts.warm_up()
         log.info("loading speech model %s", self.cfg.stt.model)
@@ -67,6 +68,18 @@ class Assistant:
             self.agent.warm_up()
         except Exception as e:  # not fatal: we'll report per interaction
             log.warning("could not warm up LLM: %s", e)
+
+    def _request_calendar_access(self) -> None:
+        try:
+            from EventKit import EKEntityTypeEvent, EKEntityTypeReminder
+
+            from ximz.tools.calendar import EventKitStore
+
+            store = EventKitStore(self.cfg.tools)
+            for label, entity in (("calendar", EKEntityTypeEvent), ("reminders", EKEntityTypeReminder)):
+                log.info("%s access: %s", label, "granted" if store.ensure_access(entity) else "NOT granted")
+        except Exception:
+            log.exception("could not request calendar access")
 
     def _wait_for_llm(self) -> None:
         """At login Ollama may still be starting: retry with exponential backoff."""
@@ -141,7 +154,7 @@ class Assistant:
     def _answer(self, text: str) -> None:
         self.bus.emit(State.THINKING, text)
         try:
-            reply = self.agent.respond(text)
+            reply = self.agent.respond(text, confirm=self._confirm)
             self._learner.submit(self._learn, text)
         except LLMUnavailableError as e:
             log.error("LLM unavailable: %s", e)
@@ -151,6 +164,15 @@ class Assistant:
             reply = self.cfg.messages.tool_limit
         log.info("reply: %r", reply)
         self._say(reply)
+
+    def _confirm(self, question: str) -> bool:
+        """Ask a yes/no question out loud; only a clear spoken yes counts."""
+        self._say(question)
+        answer = self._listen_for_command(self.cfg.tools.confirm_timeout_s)
+        ok = is_yes(answer, self.cfg.tools.yes_words, self.cfg.tools.no_words)
+        log.info("confirmation %r -> %s", answer, "yes" if ok else "no")
+        self.bus.emit(State.THINKING)
+        return ok
 
     def _learn(self, user_text: str) -> None:
         """Background: save lasting facts the model may have failed to `remember`."""

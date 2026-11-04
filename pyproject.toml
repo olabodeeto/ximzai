@@ -9,6 +9,7 @@ dependencies = [
     "numpy>=1.26",
     "ollama>=0.4",
     "pyobjc-framework-Cocoa>=10.0",
+    "pyobjc-framework-eventkit>=13.0",
     "pyobjc-framework-Quartz>=10.0",
     "pyyaml>=6.0",
     "silero-vad>=5.1",

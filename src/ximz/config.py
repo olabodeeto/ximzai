@@ -77,6 +77,19 @@ class LLMConfig:
 
 
 @dataclass(frozen=True)
+class ToolsConfig:
+    enabled: list[str]
+    volume_step: int
+    weather_location: str
+    weather_units: str
+    calendar_max_days: int
+    permission_timeout_s: float
+    confirm_timeout_s: float
+    yes_words: list[str]
+    no_words: list[str]
+
+
+@dataclass(frozen=True)
 class ConversationConfig:
     follow_up_s: float
     end_phrases: list[str]
@@ -144,6 +157,7 @@ class Config:
     wake: WakeConfig
     stt: STTConfig
     llm: LLMConfig
+    tools: ToolsConfig
     conversation: ConversationConfig
     memory: MemoryConfig
     tts: TTSConfig
@@ -184,6 +198,21 @@ def _validate(cfg: Config) -> None:
         raise ConfigError("wake.name_similarity must be in (0, 1]")
     if not 0 < cfg.wake.min_segment_s < cfg.wake.max_segment_s:
         raise ConfigError("need 0 < wake.min_segment_s < wake.max_segment_s")
+    unknown_tools = set(cfg.tools.enabled) - {"system", "weather", "calendar"}
+    if unknown_tools:
+        raise ConfigError(f"tools.enabled has unknown groups: {sorted(unknown_tools)}")
+    word_lists = {
+        "tools.yes_words": cfg.tools.yes_words, "tools.no_words": cfg.tools.no_words,
+        "conversation.end_phrases": cfg.conversation.end_phrases,
+        "wake.greetings": cfg.wake.greetings, "wake.names": cfg.wake.names,
+    }
+    for key, words in word_lists.items():
+        if not all(isinstance(w, str) for w in words):
+            raise ConfigError(f"{key} must contain only quoted strings (YAML reads bare yes/no/on/off as booleans)")
+    if cfg.tools.weather_units not in {"celsius", "fahrenheit"}:
+        raise ConfigError("tools.weather_units must be 'celsius' or 'fahrenheit'")
+    if min(cfg.tools.volume_step, cfg.tools.calendar_max_days, cfg.tools.confirm_timeout_s) <= 0:
+        raise ConfigError("tools.volume_step, calendar_max_days and confirm_timeout_s must be positive")
     if cfg.llm.max_tool_steps <= 0:
         raise ConfigError("llm.max_tool_steps must be positive")
     if cfg.conversation.follow_up_s < 0:
@@ -228,6 +257,7 @@ def load_config(path: str | Path | None = None) -> Config:
         "wake": WakeConfig,
         "stt": STTConfig,
         "llm": LLMConfig,
+        "tools": ToolsConfig,
         "conversation": ConversationConfig,
         "memory": MemoryConfig,
         "tts": TTSConfig,

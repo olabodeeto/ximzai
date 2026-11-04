@@ -7,6 +7,7 @@ model output is never trusted as-is.
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -27,6 +28,9 @@ class ToolArgumentError(ValueError):
     pass
 
 
+Confirmer = Callable[[str], bool]  # asks the user a yes/no question out loud
+
+
 @dataclass(frozen=True)
 class Tool:
     name: str
@@ -34,6 +38,11 @@ class Tool:
     parameters: dict[str, Any]  # JSON schema, type "object"
     risk: Risk
     func: Callable[..., str]
+    # For risk="confirm": builds the spoken question from the validated args.
+    confirm_prompt: Callable[..., str] | None = None
+    # Regexes over the user's words that strongly suggest this tool. Used to
+    # hint small models that otherwise sometimes *claim* an action instead.
+    triggers: tuple[str, ...] = ()
 
     def schema(self) -> dict[str, Any]:
         return {
@@ -84,16 +93,29 @@ class ToolRegistry:
     def schemas(self) -> list[dict[str, Any]]:
         return [t.schema() for t in self._tools.values()]
 
-    def call(self, name: str, args: Any) -> str:
-        """Run a tool and return its result text. Errors become text the model can read."""
+    def suggest(self, user_text: str) -> list[str]:
+        """Names of tools whose trigger phrases appear in the user's words."""
+        return [
+            t.name for t in self._tools.values()
+            if any(re.search(p, user_text, re.IGNORECASE) for p in t.triggers)
+        ]
+
+    def call(self, name: str, args: Any, confirm: Confirmer | None = None) -> str:
+        """Run a tool and return its result text. Errors become text the model can read.
+
+        `confirm`-risk tools only run after `confirm(question)` returns True."""
         tool = self._tools.get(name)
         if tool is None:
             return f"Error: there is no tool called {name}."
-        if tool.risk == "confirm":
-            # Spoken confirmation flow arrives with phase 5; refuse until then.
-            return f"Error: {name} needs spoken confirmation, which isn't available yet."
         try:
             clean = validate_args(tool.parameters, args)
+            if tool.risk == "confirm":
+                if confirm is None:
+                    return f"Error: {name} needs the user's spoken confirmation, which isn't available here."
+                question = tool.confirm_prompt(**clean) if tool.confirm_prompt else f"Should I run {name}?"
+                if not confirm(question):
+                    log.info("tool %s declined by user", name)
+                    return "The user said no, so nothing was done. Acknowledge briefly."
             result = tool.func(**clean)
         except ToolArgumentError as e:
             log.warning("tool %s rejected arguments: %s", name, e)

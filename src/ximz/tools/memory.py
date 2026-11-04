@@ -28,6 +28,7 @@ def memory_tools(store: MemoryStore, max_fact_chars: int) -> list[Tool]:
             },
             risk="safe",
             func=lambda fact: store.add(fact),
+            triggers=(r"\bremember (that|this)\b", r"\bdon't forget that\b"),
         ),
         Tool(
             name="forget",
@@ -46,5 +47,6 @@ def memory_tools(store: MemoryStore, max_fact_chars: int) -> list[Tool]:
             },
             risk="safe",
             func=lambda about: store.forget(about),
+            triggers=(r"\bforget\b",),
         ),
     ]

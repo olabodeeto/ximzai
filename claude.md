@@ -139,7 +139,11 @@ Work through these in order, getting each one working end-to-end before starting
 3. ✅ **Wake phrase.** Always listening for "Hello Ximz" (Whisper check), spoken "Yes?" on wake.
 4. ✅ **Autostart.** launchd agent, logging, crash recovery, Ollama health check, `start/stop ximz`.
    (Also done early: GUI overlay.)
-5. **Tools.** Registry plus system tools (time, date, open app, volume, battery, weather), with confirm flow.
+5. ✅ **Tools.** Registry plus system tools (time/date via system prompt, open/quit app, volume, battery,
+   weather via Open-Meteo, Calendar/Reminders via EventKit), with spoken confirm flow. Small-model
+   safeguards in `agent.py`: tool steps kept in history, per-tool trigger hints, a nudge when the
+   model claims an action without a tool call, and trailing-filler trimming. Verify tool behaviour
+   against the real model (`qwen2.5:3b`), not only fakes — it claims actions it never performed.
 6. **Streaming + interruption.** Sentence-chunked TTS; stop speaking when the user talks.
 7. **Custom "Hello Ximz" wake word.** Optional: train with openWakeWord's notebook and swap it
    in for the Whisper check if idle cost or false triggers become a problem.

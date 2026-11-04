@@ -96,6 +96,47 @@ def test_is_useful_fact(fact: str, useful: bool) -> None:
     assert is_useful_fact(fact) is useful
 
 
+@pytest.mark.parametrize(
+    ("reply", "claim"),
+    [("Opening Spotify for you.", True), ("I have added a reminder to call Funmi.", True),
+     ("I've muted the sound.", True), ("The sound is now muted.", True),
+     ("The capital of Nigeria is Abuja.", False), ("You have a meeting at ten.", False),
+     ("Yes Olabode, I can hear you.", False)],
+)
+def test_claims_action(reply: str, claim: bool) -> None:
+    from ximz.agent import claims_action
+
+    assert claims_action(reply) is claim
+
+
+@pytest.mark.parametrize(
+    ("reply", "tidy"),
+    [("Spotify is open. Is there anything else I can help with?", "Spotify is open."),
+     ("It's 6 PM. How else can I assist you today?", "It's 6 PM."),
+     ("Is there anything else?", "Is there anything else?"),  # never empty the reply
+     ("Abuja is the capital.", "Abuja is the capital.")],
+)
+def test_tidy_reply(reply: str, tidy: str) -> None:
+    from ximz.agent import tidy_reply
+
+    assert tidy_reply(reply) == tidy
+
+
+def test_false_action_claim_is_nudged_into_a_tool_call(tmp_path: Path) -> None:
+    client = FakeClient([
+        msg("I have added that to memory."),                       # claim, no tool call
+        msg(tool_calls=[call("remember", fact="The user likes tea.")]),
+        msg("Got it, you like tea."),
+    ])
+    agent, store = _memory_agent(tmp_path, client)
+    assert agent.respond("I like tea") == "Got it, you like tea."
+    assert store.facts() == ["The user likes tea."]
+    # The false claim and the nudge are not kept in history.
+    agent.respond("hi")
+    history = [m.get("content") if isinstance(m, dict) else m.content for m in client.calls[-1]["messages"]]
+    assert "I have added that to memory." not in history
+
+
 def test_tool_loop_is_capped(tmp_path: Path) -> None:
     looping = [msg(tool_calls=[call("forget", about="x" * 3)]) for _ in range(20)]
     agent, _ = _memory_agent(tmp_path, FakeClient(looping))

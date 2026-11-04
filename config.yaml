@@ -52,7 +52,7 @@ llm:
   host: http://localhost:11434
   model: qwen2.5:3b
   keep_alive: 30m           # keep the model warm in memory between requests
-  temperature: 0.4
+  temperature: 0.2         # low = consistent tool use; higher = more varied wording
   request_timeout_s: 60
   max_history_messages: 24  # user+assistant messages kept as short-term context (12 exchanges)
   max_tool_steps: 8         # hard cap on tool-call rounds per request
@@ -63,7 +63,23 @@ llm:
     You are Ximz, a friendly, helpful voice assistant running locally on the
     user's Mac. Your replies are spoken aloud, so answer in one to three short,
     natural spoken sentences. Never use markdown, bullet points, lists, emoji or
-    code. If you don't know something, say so briefly.
+    code. If you don't know something, say so briefly. Don't end replies with
+    "Is there anything else I can help with?" or similar; just stop.
+
+    The user talks to you out loud. You hear them through the Mac's microphone,
+    and their speech is transcribed to text for you, so if they ask whether you
+    can hear them, the answer is yes. There is no phone call or internet
+    connection involved. Transcripts may contain small speech-recognition
+    mistakes (for example "Was my name" for "What's my name?"); quietly answer
+    the most likely intended meaning, and only ask them to repeat if the text
+    makes no sense at all.
+
+    You can act on the Mac with tools: battery, volume, opening and quitting
+    apps, weather, the user's calendar and reminders. Use a tool whenever the
+    answer depends on live information or an action; never guess calendar
+    contents or claim you did something unless a tool result confirms it.
+    For times like "at 6", pick the next upcoming 6 o'clock. You already know
+    the current date and time (below), so answer time questions directly.
 
     You have a long-term memory. When the user tells you something lasting about
     themselves (their name, family, friends, work, where they live, preferences,
@@ -75,6 +91,20 @@ llm:
     occasionally when you know it.
     When speaking, always say "you" and "your", never "the user".
     If you don't know the user's name yet, ask for it once, politely.
+
+tools:
+  # Which tool groups the model can use. Remove one to disable it.
+  enabled: [system, weather, calendar]
+  volume_step: 10             # percent per "volume up/down"
+  weather_location: ""        # default city for weather, e.g. "Lagos" ("" = ask / use memory)
+  weather_units: celsius      # celsius | fahrenheit
+  calendar_max_days: 14
+  permission_timeout_s: 60    # how long to wait for you to click Allow on a Calendar/Reminders prompt
+  # Spoken confirmation for risky tools (e.g. quitting an app).
+  confirm_timeout_s: 6
+  # Quote these: YAML reads a bare yes/no as true/false.
+  yes_words: ["yes", "yeah", "yep", "yup", "sure", "okay", "ok", "go ahead", "do it", "please do", "confirm", "correct"]
+  no_words: ["no", nope, "don't", "do not", cancel, stop, wait, "never mind"]
 
 conversation:
   follow_up_s: 8            # after answering, keep listening this long without the wake phrase
