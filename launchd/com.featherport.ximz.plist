@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Template: scripts/install_agent.sh fills in the __PLACEHOLDERS__. -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.featherport.ximz</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__PYTHON__</string>
+        <string>-m</string>
+        <string>ximz.main</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>__WORKDIR__</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>PYTHONUNBUFFERED</key>
+        <string>1</string>
+        <!-- Privacy: never contact huggingface.co at runtime; models are
+             downloaded once by install_agent.sh. -->
+        <key>HF_HUB_OFFLINE</key>
+        <string>1</string>
+        <key>PYTHONWARNINGS</key>
+        <string>ignore::FutureWarning</string>
+    </dict>
+
+    <!-- Start at login, restart if it crashes (but not faster than every 10s). -->
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <!-- Run in the logged-in GUI session: needed for the mic and the overlay. -->
+    <key>LimitLoadToSessionType</key>
+    <string>Aqua</string>
+    <key>ProcessType</key>
+    <string>Interactive</string>
+
+    <key>StandardOutPath</key>
+    <string>__LOG_DIR__/ximz.log</string>
+    <key>StandardErrorPath</key>
+    <string>__LOG_DIR__/ximz.err.log</string>
+</dict>
+</plist>

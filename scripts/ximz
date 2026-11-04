@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+# Control the Ximz background agent.
+#   ximz start | stop | restart | status | logs
+set -euo pipefail
+
+LABEL="com.featherport.ximz"
+DOMAIN="gui/$(id -u)"
+PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+LOG_DIR="$HOME/Library/Logs/ximz"
+
+is_loaded() { launchctl print "$DOMAIN/$LABEL" >/dev/null 2>&1; }
+pid() { launchctl print "$DOMAIN/$LABEL" 2>/dev/null | awk '/^\tpid = /{print $3}'; }
+
+need_install() {
+  if [[ ! -f "$PLIST" ]]; then
+    echo "Ximz isn't installed as a login agent yet. Run: ./scripts/install_agent.sh" >&2
+    exit 1
+  fi
+}
+
+cmd_start() {
+  need_install
+  if is_loaded && [[ -n "$(pid)" ]]; then
+    echo "Ximz is already running (pid $(pid))."
+    return
+  fi
+  is_loaded || launchctl bootstrap "$DOMAIN" "$PLIST"
+  launchctl kickstart "$DOMAIN/$LABEL" >/dev/null 2>&1 || true
+  for _ in {1..20}; do [[ -n "$(pid)" ]] && break; sleep 0.25; done
+  if [[ -n "$(pid)" ]]; then
+    echo "Ximz started (pid $(pid)). Say \"Hello Ximz\"."
+  else
+    echo "Ximz failed to start. Check: ximz logs" >&2
+    exit 1
+  fi
+}
+
+cmd_stop() {
+  if ! is_loaded; then
+    echo "Ximz is not running."
+    return
+  fi
+  # bootout unloads the agent so KeepAlive doesn't restart it. It will still
+  # start again at next login (or with: start ximz).
+  launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
+  # bootout is asynchronous; wait so an immediate start doesn't race it.
+  for _ in {1..40}; do is_loaded || break; sleep 0.25; done
+  echo "Ximz stopped. It will start again at next login, or run: start ximz"
+}
+
+cmd_status() {
+  if is_loaded && [[ -n "$(pid)" ]]; then
+    echo "Ximz is running (pid $(pid))."
+  elif is_loaded; then
+    echo "Ximz is loaded but not running (it may be restarting). See: ximz logs"
+  else
+    echo "Ximz is stopped."
+  fi
+}
+
+case "${1:-status}" in
+  start)   cmd_start ;;
+  stop)    cmd_stop ;;
+  restart) cmd_stop; cmd_start ;;
+  status)  cmd_status ;;
+  logs)    exec tail -n 50 -f "$LOG_DIR/ximz.log" ;;
+  *) echo "usage: ximz start|stop|restart|status|logs" >&2; exit 2 ;;
+esac

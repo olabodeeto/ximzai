@@ -1,0 +1,1 @@
+"""Ximz — local voice assistant."""

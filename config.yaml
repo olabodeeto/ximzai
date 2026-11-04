@@ -1,0 +1,145 @@
+# Ximz configuration. All tunables live here — no magic numbers in code.
+# Model sizes by RAM:
+#   8GB:   llm.model: qwen2.5:3b   stt.model: mlx-community/whisper-base.en-mlx
+#   16GB+: llm.model: qwen2.5:7b   stt.model: mlx-community/whisper-small.en-mlx
+
+audio:
+  sample_rate: 16000        # Hz; whisper + VAD expect 16k mono
+  channels: 1
+  chunk_samples: 512        # mic block size; Silero VAD requires 512 at 16 kHz
+  queue_seconds: 30         # mic buffer while Ximz is busy; oldest audio dropped beyond this
+  silent_mic_warn_s: 10     # warn if the mic delivers pure digital silence this long (permission denied)
+
+vad:
+  threshold: 0.5            # speech probability that starts a segment
+  neg_threshold: 0.35       # below this counts as silence while in a segment (hysteresis)
+  min_speech_ms: 250        # discard blips shorter than this
+  silence_ms: 700           # this much silence ends a segment
+  pre_roll_ms: 300          # audio kept from just before speech started
+  listen_timeout_s: 6       # after "Yes?", how long to wait for you to start talking
+  max_command_s: 20         # hard cap on one spoken request
+
+wake:
+  # "Hello Ximz" is detected by transcribing short speech bursts and matching
+  # a greeting followed by the name. Whisper spells "Ximz" many ways, so the
+  # name is fuzzy-matched against these spellings.
+  greetings: [hello, hallo, hullo, helo, hey]
+  names: [ximz, xims, zims, zimz, sims, simms, simz, ximes, zimms, scenes, seems]
+  name_similarity: 0.75     # 0..1 fuzzy match threshold for the name
+  max_leading_words: 2      # allow a couple of filler words before the greeting ("uh, hello ximz")
+  # Saying just the name also wakes Ximz ("Ximz, what time is it?"). The name
+  # must be the first word (after optional "ok"/"um"), and matching is stricter,
+  # since a lone word is easier to mistake ("Seems like…" must not wake it).
+  name_alone: true
+  name_alone_names: [ximz, xims, zims, zimz, simz, ximes, zimms]
+  name_alone_similarity: 0.85
+  min_segment_s: 0.4        # ignore bursts too short to be the phrase
+  max_segment_s: 8.0        # ignore long speech (conversations, TV) — never transcribed
+  min_command_words: 2      # "Hello Ximz, what time is it" → answer directly, skip the greeting
+  greeting: "Yes?"          # spoken right after the wake phrase
+  # Hint text given to Whisper for wake checks only, so it spells the unusual
+  # name as "Ximz" instead of guessing ("Head of scenes"). "" disables it.
+  stt_prompt: "Hello Ximz."
+
+stt:
+  model: mlx-community/whisper-base.en-mlx
+  language: en
+  # Names/words Whisper should spell correctly in your requests (given to it as
+  # a hint). Add people, places and project names you mention often.
+  vocabulary: [Olabode, Ximz]
+
+llm:
+  host: http://localhost:11434
+  model: qwen2.5:3b
+  keep_alive: 30m           # keep the model warm in memory between requests
+  temperature: 0.4
+  request_timeout_s: 60
+  max_history_messages: 24  # user+assistant messages kept as short-term context (12 exchanges)
+  max_tool_steps: 8         # hard cap on tool-call rounds per request
+  startup_wait_s: 180       # at login, wait up to this long for Ollama to come up
+  retry_initial_s: 1        # health-check backoff: first delay
+  retry_max_s: 30           # health-check backoff: max delay
+  system_prompt: >-
+    You are Ximz, a friendly, helpful voice assistant running locally on the
+    user's Mac. Your replies are spoken aloud, so answer in one to three short,
+    natural spoken sentences. Never use markdown, bullet points, lists, emoji or
+    code. If you don't know something, say so briefly.
+
+    You have a long-term memory. When the user tells you something lasting about
+    themselves (their name, family, friends, work, where they live, preferences,
+    important dates), call the remember tool with one short fact, written about
+    "the user", for example "The user's name is Ada." Don't save small talk or
+    temporary things. If they ask you to forget something, call the forget tool.
+    Use what you remember only when it is relevant to what the user just said;
+    don't recite facts or say "I remember" unprompted. Call the user by name
+    occasionally when you know it.
+    When speaking, always say "you" and "your", never "the user".
+    If you don't know the user's name yet, ask for it once, politely.
+
+conversation:
+  follow_up_s: 8            # after answering, keep listening this long without the wake phrase
+  end_phrases: [stop, "that's all", "that is all", "that's it", goodbye, bye, "bye bye",
+                "never mind", nevermind, "no thanks", "no thank you", "thanks that's all",
+                "thank you that's all", nothing]
+  end_reply: "Okay."        # spoken when you end the conversation
+
+memory:
+  enabled: true
+  path: ~/Library/Application Support/ximz/memory.json   # private (chmod 600), never leaves the Mac
+  max_facts: 100            # oldest facts dropped beyond this
+  max_fact_chars: 200
+  # Backstop for small models that forget to call `remember`: after each answer,
+  # a background pass extracts new lasting facts from what you said.
+  auto_extract: true
+  max_extract_facts: 3      # per message
+  extract_prompt: >-
+    You maintain the long-term memory of a personal voice assistant. Read the
+    user's latest message and list any NEW lasting facts it reveals about the
+    user: name, family, friends, colleagues, work, projects, daily routine,
+    schedule, habits, preferences, places, important dates. Skip questions,
+    small talk, requests, feelings, temporary states and anything already
+    known. Every fact must contain a specific detail (a name, place, time,
+    activity or thing); never output vague facts like "the user has a name".
+    Write each fact as one short sentence about "the user". Reply only with
+    JSON: {"facts": ["..."]}, with an empty list if there is nothing new.
+
+tts:
+  backend: kokoro           # kokoro = natural neural voice (offline) | say = macOS built-in
+  # Kokoro female voices — American: af_heart (warm, most natural), af_bella,
+  # af_nicole (soft, breathy), af_sarah, af_sky, af_nova, af_jessica, af_river,
+  # af_aoede, af_kore, af_alloy. British (set lang: en-gb): bf_emma, bf_isabella,
+  # bf_alice, bf_lily.
+  voice: af_heart
+  speed: 1.0                # 0.8 = slower, 1.2 = faster
+  lang: en-us
+  model_path: models/kokoro/kokoro-v1.0.onnx
+  voices_path: models/kokoro/voices-v1.0.bin
+  # macOS `say` voice: used when backend is `say`, and as automatic fallback if
+  # Kokoro fails to load or speak.
+  say_voice: Samantha
+  say_rate: 190             # words per minute
+
+gui:
+  enabled: true             # floating overlay + menu-bar icon; false = headless
+  position: center          # center | top | bottom of the screen
+  # The overlay shows only animated sound waves (no text). Colour and motion
+  # follow the state: blue = listening, purple = thinking, green = speaking.
+  width: 520                # points
+  height: 320               # points
+  margin: 14                # distance from the screen edge (top/bottom only), points
+  fade_s: 0.25              # fade in/out duration
+  hide_delay_s: 0.8         # linger this long after Ximz goes idle
+  menu_bar_icon: true
+
+messages:
+  error: Sorry, something went wrong. Please try again.
+  llm_unavailable: I can't reach my language model right now. Is Ollama running?
+  no_speech: I didn't catch that.
+  tool_limit: Sorry, I couldn't finish that.
+
+logging:
+  level: INFO
+
+debug:
+  save_audio: false         # privacy: audio stays in memory unless true
+  audio_dir: debug_audio
